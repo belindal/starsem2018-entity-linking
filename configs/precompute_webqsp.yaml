@@ -32,7 +32,7 @@ model:  # If an entity linker features a trained model, these parameters are use
   models.save.path: "trainedmodels/"
 
 wikidata:
-  backend: "http://knowledgebase:8890/sparql"
+  backend: "http://localhost:8890/sparql"
   timeout: 20
   filter.out.relation.classes: "rq"
   

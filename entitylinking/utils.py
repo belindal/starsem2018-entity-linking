@@ -29,7 +29,7 @@ special_tokens = {"&ndash;": "–",
                   }
 digits_pattern = re.compile(r"([0-9][0-9.,]*)")
 
-corenlp = StanfordCoreNLP('http://semanticparsing:9000')
+corenlp = StanfordCoreNLP('http://100.97.69.173:9000')
 corenlp_properties = {
     'annotators': 'tokenize, pos, ner',
     'outputFormat': 'json'

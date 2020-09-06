@@ -8,7 +8,7 @@ from SPARQLWrapper import SPARQLWrapper, JSON
 from entitylinking.wikidata import wdscheme
 
 wdaccess_p = {
-    'backend': "http://knowledgebase:8890/sparql",
+    'backend': "http://100.97.69.173:8890/sparql",
     'timeout': 20,
     'global_result_limit': 1000,
     'logger': logging.getLogger(__name__),
@@ -29,7 +29,7 @@ def set_backend(backend_url):
 
 
 sparql = None
-set_backend(wdaccess_p.get('backend', "http://knowledgebase:8890/sparql"))
+set_backend(wdaccess_p.get('backend', "http://100.97.69.173:8890/sparql"))
 GLOBAL_RESULT_LIMIT = wdaccess_p['global_result_limit']
 
 sparql_inference_clause = """
@@ -131,8 +131,11 @@ def query_wikidata(query, prefix=wdscheme.WIKIDATA_ENTITY_PREFIX, use_cache=-1, 
     try:
         results = sparql.query().convert()
     except Exception as inst:
-        logger.debug(inst)
-        return []
+        #import pdb
+        #pdb.set_trace()
+        results = sparql.query().convert()
+        #logger.debug(inst)
+        #return []
     # Change the timeout back to the default
     if timeout > 0:
         sparql.setTimeout(wdaccess_p.get('timeout', 40))

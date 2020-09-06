@@ -45,12 +45,12 @@ class CustomCombinedLoss(nn.Module):
 
         positive_targets_weights = torch.ones_like(positive_target).float()
         for i in range(positive_targets_weights.size(0)):
-            if positive_target[i].data[0] < 1:
+            if positive_target[i].item() < 1:
                 positive_targets_weights[i] = self._weight
         loss = F.binary_cross_entropy(positive_prob, positive_target, weight=positive_targets_weights,
                                       size_average=False)
         for i in range(target.size(0)):
-            if target_predictions[i].data[0] > -1:
+            if target_predictions[i].item() > -1:
                 loss += self._criterion_choice(predictions[i], target_predictions[i])
         return loss
 
@@ -208,7 +208,7 @@ class PytorchModel(Loggable, metaclass=abc.ABCMeta):
         loss = self._criterion((positive_prob, predictions), batch_targets)
         loss.backward()
         self._optimizer.step()
-        cur_loss = loss.data[0]
+        cur_loss = loss.item()
         if torch.cuda.is_available():
             predictions = predictions.cpu()
             batch_targets = batch_targets.cpu()
@@ -245,7 +245,7 @@ class PytorchModel(Loggable, metaclass=abc.ABCMeta):
             batch_targets = batch_input[0]
             batch_positive_prob, batch_predictions = self._model(*batch_input[1:])
             # batch_predictions = F.softmax(batch_predictions)
-            running_loss += self._criterion((batch_positive_prob, batch_predictions), batch_targets).data[0] * len(batch_targets)
+            running_loss += self._criterion((batch_positive_prob, batch_predictions), batch_targets).item() * len(batch_targets)
 
             if torch.cuda.is_available():
                 batch_predictions = batch_predictions.cpu()

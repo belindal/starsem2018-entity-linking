@@ -1,6 +1,6 @@
 {
   "models.save.path": "trainedmodels/",
-  "word.embeddings": "../resources/embeddings/glove/glove.6B.50d.txt",
+  "word.embeddings": "resources/embeddings/glove/glove.6B.50d.txt",
   "epochs": 200,
   "model.checkpoint": true,
   "negative.class.weight": [

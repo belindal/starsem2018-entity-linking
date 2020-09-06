@@ -10,6 +10,8 @@ from entitylinking.core.sentence import Sentence
 from entitylinking.evaluation import measures
 from entitylinking.wikidata import queries
 
+from entitylinking import utils
+
 
 class Dataset(Loggable, metaclass=abc.ABCMeta):
 
@@ -62,7 +64,8 @@ class Dataset(Loggable, metaclass=abc.ABCMeta):
     def eval(self, linker: BaseLinker,
              only_the_main_entity=False,
              fb=False,
-             verbose=True):
+             verbose=True,
+             main_entity_given=False):
         performance_per_entity_type = defaultdict(lambda: [0, 0, 0])
         predicted_correct = 0
         predicted_total = 0
@@ -72,6 +75,44 @@ class Dataset(Loggable, metaclass=abc.ABCMeta):
 
         for el_id, text, annotations, main_entity, gold_entity_classes in data_iterator:
             sentence = Sentence(input_text=text)
+            # TODO SET FALSE
+            use_main_entity = main_entity_given
+            if use_main_entity:
+                if sentence.tagged is None and sentence.input_text is not None:
+                    sentence.tagged = utils.get_tagged_from_server(sentence.input_text,
+                                                                   caseless=sentence.input_text.islower())
+                # find main entity mentions
+                for i, t in enumerate(sentence.tagged):
+                    t['abs_id'] = i
+                mention_chunks = []
+                for chunk in sentence.tagged:
+                    if chunk['characterOffsetBegin'] >= main_entity[1] and chunk['characterOffsetEnd'] <= main_entity[2]:
+                        mention_chunks.append(chunk)
+                    if chunk['characterOffsetEnd'] >= main_entity[2]:
+                        break
+                try:
+                    assert len(mention_chunks) > 0
+                    for chunk in mention_chunks:
+                        assert chunk['word'] in text[main_entity[1]:main_entity[2]]
+                    assert mention_chunks[0]['word'] == text[main_entity[1]:main_entity[1] + len(mention_chunks[0]['word'])]
+                    assert mention_chunks[-1]['word'] == text[main_entity[2] - len(mention_chunks[-1]['word']):main_entity[2]]
+                except AssertionError:
+                    print("bad mention: {} {}".format(el_id, main_entity))
+                    mention_chunks = []
+                    if el_id == 'WebQTest-1575':
+                        mention_chunks.append(sentence.tagged[8])
+                fragment_type = ("NNP" if any(el['pos'] in {'NNP', 'NNPS'} for el in mention_chunks) else
+                         "NN" if any(el['pos'] != "CD" and el['ner'] != "DATE" for el in mention_chunks) else
+                         "DATE" if all(el['ner'] == "DATE" for el in mention_chunks) else utils.unknown_el)
+                mentions = [{
+                    'type': fragment_type,
+                    'tokens': [el['word'] for el in mention_chunks],
+                    'token_ids': [el['abs_id'] for el in mention_chunks],
+                    'poss': [el['pos'] for el in mention_chunks],
+                    'offsets': (main_entity[1], main_entity[2])
+                }]
+
+                sentence.mentions = mentions
             sentence = linker.link_entities_in_sentence_obj(sentence, element_id=el_id)
             entities = [(l.get('kbID'),) + tuple(e['offsets']) for e in sentence.entities
                         for l in e['linkings']
@@ -85,18 +126,26 @@ class Dataset(Loggable, metaclass=abc.ABCMeta):
                 annotations = [main_entity]
                 match = measures.entity_linking_tp_with_overlap(annotations, entities)
             else:
-                entities = [e[0] for e in entities]
-                annotations = [e[0] for e in annotations]
-                match = 0
+                match = measures.entity_linking_tp_with_overlap(annotations, entities)
                 for ai, a in enumerate(annotations):
                     gold_entity_class = gold_entity_classes[ai] if gold_entity_classes and gold_entity_classes[ai] else "other"
-                    if a in entities:
-                        match += 1
-                        performance_per_entity_type[gold_entity_class][0] += 1
+                    a_match = measures.entity_linking_tp_with_overlap([a], entities)
+                    performance_per_entity_type[gold_entity_class][0] += a_match
                     performance_per_entity_type[gold_entity_class][2] += 1
                 for entity_class in entity_classes:
                     performance_per_entity_type[entity_class][1] += 1
 
+                #entities = [e[0] for e in entities]
+                #annotations = [e[0] for e in annotations]
+                #match = 0
+                #for ai, a in enumerate(annotations):
+                #    gold_entity_class = gold_entity_classes[ai] if gold_entity_classes and gold_entity_classes[ai] else "other"
+                #    if a in entities:
+                #        match += 1
+                #        performance_per_entity_type[gold_entity_class][0] += 1
+                #    performance_per_entity_type[gold_entity_class][2] += 1
+                #for entity_class in entity_classes:
+                #    performance_per_entity_type[entity_class][1] += 1
 
             predicted_correct += match
             predicted_total += len(entities)
@@ -157,8 +206,8 @@ class WebQSPDataset(Dataset):
         questions = [self._questions[i] for i in (self._dev_ids if dev else self._train_ids)]
         samples = [(q_obj['question_id'],
                     q_obj['utterance'],
-                    [(e,) for e in q_obj['entities_fb' if fb else 'entities']],
-                    ((q_obj['main_entity_fb' if fb else 'main_entity'],) + tuple(q_obj['main_entity_pos'])) if 'main_entity' in q_obj else (),
+                    [(e, q_obj['entities_pos'][i][0], q_obj['entities_pos'][i][1],) for i, e in enumerate(q_obj['entities_fb' if fb else 'entities'])],
+                    ((q_obj['main_entity_fb' if fb else 'main_entity'],) + tuple(q_obj['main_entity_pos']) + (q_obj['main_entity_tokens'],)) if 'main_entity' in q_obj else (),
                     q_obj.get('entity_classes')
                     )
                    for q_obj in questions]

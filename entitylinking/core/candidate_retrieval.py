@@ -46,7 +46,8 @@ def link_mention(entity_tokens: List, entity_tags: Iterable = None) -> List:
     if all(e.lower() in utils.stop_words_en for e in entity_tokens):
         return []
 
-    linkings = wdaccess.query_wikidata(queries.query_get_entity_by_label(entity_tokens))
+    query = queries.query_get_entity_by_label(entity_tokens)
+    linkings = wdaccess.query_wikidata(query)
     if not linkings and entity_tags and all(t.startswith("NN") for t in entity_tags):
         entity_lemmas = utils.lemmatize_tokens(entity_tokens)
         if [l.lower() for l in entity_lemmas] != [t.lower() for t in entity_tokens]:

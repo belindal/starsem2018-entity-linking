@@ -27,7 +27,7 @@ dataset:
   debug_mode: False
 
 entity.linking:  # These parameters are used to instantiate an entity linker
-  candidates.to.retrieve: -1
+  candidates.to.retrieve: -1  # TODO evaluate at recall 1?
   max.match.diff: 2
 
   linker: MLLinker
@@ -42,8 +42,9 @@ entity.linking:  # These parameters are used to instantiate an entity linker
 
 model:
   models.save.path: "trainedmodels/"
-  word.embeddings: "../resources/embeddings/glove/glove.6B.50d.txt"
+  word.embeddings: "resources/embeddings/glove/glove.6B.50d.txt"
   kb.embeddings: "data/WikidataEmb/dec_17_50/"
+  batch.size: 128
   epochs: 100
   model.checkpoint: True
   evaluate.on.dataset.after: 20
@@ -79,7 +80,7 @@ model:
   relation.layer.size: 75
 
 wikidata:
-  backend: "http://knowledgebase:8890/sparql"
+  backend: "http://localhost:8890/sparql"
   timeout: 20
   filter.out.relation.classes: "rq"
   

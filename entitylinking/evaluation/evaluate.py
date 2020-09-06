@@ -23,16 +23,21 @@ def evaluate(path_to_model, config_file_path):
     logger.info("Load the data, {} from {}".format(dataset_config['type'], dataset_config['path_to_dataset']))
     evaluation_dataset = getattr(dataset, dataset_config['type'])(logger=logger, **dataset_config)
 
-    logger.info("Evaluate")
     fb = 'fb' in config['evaluation'] and config['evaluation']['fb']
+    
+    logger.info("Evaluate (not main only)")
     results = evaluation_dataset.eval(entitylinker, fb=fb)
     print("Results: {}".format(results))
-    logger.info("Evaluate (Main only)")
-    main_entity_results = results
+
+    main_entity_results = None
     if any(len(t[3]) > 0 for t in evaluation_dataset.get_samples(dev=True)):
+        logger.info("Evaluate (Main only)")
         entitylinker._one_entity_mode = True
-        main_entity_results = evaluation_dataset.eval(entitylinker, only_the_main_entity=True, fb=fb)
+        main_entity_results = evaluation_dataset.eval(entitylinker, only_the_main_entity=True, fb=fb, main_entity_given=False)
         print("Results: {}".format(main_entity_results))
+    # logger.info("Evaluate (not main only)")
+    # results = evaluation_dataset.eval(entitylinker, fb=fb)
+    # print("Results: {}".format(results))
 
     now = datetime.datetime.now()
     with open(f"results/seed_time_{now.date()}_{now.microsecond}.txt", "w") as out:

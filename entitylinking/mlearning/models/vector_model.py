@@ -11,71 +11,104 @@ from torch.nn import functional as F
 from tqdm import tqdm
 
 from entitylinking.mlearning.models.pytorchmodel import ELModel
+from pytorch_transformers import (WEIGHTS_NAME, BertConfig, BertTokenizer)
+from pytorch_transformers.modeling_bert import (BertPreTrainedModel,
+                                                BertModel)
 
+use_bert = False
+config = BertConfig.from_pretrained('{}-uncased'.format('bert-base'))
+tokenizer = BertTokenizer.from_pretrained('{}-uncased'.format('bert-base'))
 
-class Words2VectorNet(nn.Module):
+if use_bert:
+    superclass = BertPreTrainedModel
+else:
+    superclass = nn.Module
+class Words2VectorNet(superclass):
 
     def __init__(self, parameters, word_embeddings=None):
-        super(Words2VectorNet, self).__init__()
-        self._p = parameters
-        self._dropout = nn.Dropout(p=self._p.get('dropout', '0.1'))
-        self._word_embedding = nn.Embedding(self._p['word.vocab.size'], self._p['word.emb.size'], padding_idx=0)
-        if word_embeddings is not None:
-            word_embeddings = torch.from_numpy(word_embeddings).float()
-            self._word_embedding.weight = nn.Parameter(word_embeddings)
-        self._word_embedding.weight.requires_grad = False
+        if use_bert:
+            super(Words2VectorNet, self).__init__(config)
+            self.bert = BertModel(config)
+            self.bert.from_pretrained('{}-uncased'.format('bert-base'))
+            #if torch.cuda.device_count() > 1:
+            #    self.bert = torch.nn.DataParallel(self.bert)
+            self._p = parameters
+            self._dropout = nn.Dropout(p=self._p.get('dropout', '0.1'))
+            self._word_embedding = nn.Embedding(self._p['word.vocab.size'], self._p['word.emb.size'], padding_idx=0)
+            if word_embeddings is not None:
+                word_embeddings = torch.from_numpy(word_embeddings).float()
+                self._word_embedding.weight = nn.Parameter(word_embeddings)
+            self._word_embedding.weight.requires_grad = False
+            self._nonlinearity = nn.ReLU() if self._p.get('enc.activation', 'tanh') == 'relu' else nn.Tanh()
+            out_size=768
+        else:
+            super(Words2VectorNet, self).__init__()
+            self._p = parameters
+            self._dropout = nn.Dropout(p=self._p.get('dropout', '0.1'))
+            self._word_embedding = nn.Embedding(self._p['word.vocab.size'], self._p['word.emb.size'], padding_idx=0)
+            if word_embeddings is not None:
+                word_embeddings = torch.from_numpy(word_embeddings).float()
+                self._word_embedding.weight = nn.Parameter(word_embeddings)
+            self._word_embedding.weight.requires_grad = False
 
-        self._pos_embedding = nn.Embedding(3, self._p['poss.emb.size'], padding_idx=0)
+            self._pos_embedding = nn.Embedding(3, self._p['poss.emb.size'], padding_idx=0)
 
-        self._word_encoding_conv = nn.Conv1d(self._p['word.emb.size'] + self._p['poss.emb.size'],
-                                             self._p['word.conv.size'],
-                                             self._p['word.conv.width'],
-                                             padding=self._p['word.conv.width']//2)
+            self._word_encoding_conv = nn.Conv1d(self._p['word.emb.size'] + self._p['poss.emb.size'],
+                                                 self._p['word.conv.size'],
+                                                 self._p['word.conv.width'],
+                                                 padding=self._p['word.conv.width']//2)
 
-        self._nonlinearity = nn.ReLU() if self._p.get('enc.activation', 'tanh') == 'relu' else nn.Tanh()
-        self._convs = nn.ModuleList([
-            nn.Sequential(nn.Conv1d(in_channels=self._p['word.conv.size'],
-                                    out_channels=self._p['word.conv.size'],
-                                    kernel_size=self._p['word.conv.width'],
-                                    padding=self._p['char.conv.width']//2 * 2**(j + 1) if not self._p.get("legacy.mode", False) else self._p['char.conv.width']//2 + 2**(j + 1),
-                                    dilation=2**(j + 1),
-                                    bias=True),
-                          self._nonlinearity
-                          )
-            for j in range(self._p.get('word.conv.depth', 1))
-        ])
-        self._block_conv = nn.Conv1d(self._p['word.conv.size'],
-                                     self._p['word.conv.size'],
-                                     self._p['word.conv.width'],
-                                     padding=self._p['word.conv.width']//2)
+            self._nonlinearity = nn.ReLU() if self._p.get('enc.activation', 'tanh') == 'relu' else nn.Tanh()
+            self._convs = nn.ModuleList([
+                nn.Sequential(nn.Conv1d(in_channels=self._p['word.conv.size'],
+                                        out_channels=self._p['word.conv.size'],
+                                        kernel_size=self._p['word.conv.width'],
+                                        padding=self._p['char.conv.width']//2 * 2**(j + 1) if not self._p.get("legacy.mode", False) else self._p['char.conv.width']//2 + 2**(j + 1),
+                                        dilation=2**(j + 1),
+                                        bias=True),
+                              self._nonlinearity
+                              )
+                for j in range(self._p.get('word.conv.depth', 1))
+            ])
+            self._block_conv = nn.Conv1d(self._p['word.conv.size'],
+                                         self._p['word.conv.size'],
+                                         self._p['word.conv.width'],
+                                         padding=self._p['word.conv.width']//2)
+            out_size =self._p['word.conv.size']
 
         self.sem_layers = nn.Sequential(
             self._dropout,
-            nn.Linear(self._p['word.conv.size'], self._p['word.enc.size']),
+            nn.Linear(out_size, self._p['word.enc.size']),
             self._nonlinearity,
         )
 
         self._pool = nn.AdaptiveMaxPool1d(1) if self._p.get('enc.pooling', 'max') == 'max' else nn.AdaptiveAvgPool1d(1)
 
     def forward(self, sent_m_with_pos):
-        sent_m_with_pos = sent_m_with_pos.long()
-        sent_m = sent_m_with_pos[..., 0]
-        positions = sent_m_with_pos[..., 1]
-        sent_m = self._word_embedding(sent_m)
-        positions = self._pos_embedding(positions)
+        if use_bert:
+            # non-zero tokens are non-masked
+            sent_m_with_pos = sent_m_with_pos.long()
+            sent_m = self.bert(input_ids=sent_m_with_pos, attention_mask=(sent_m_with_pos != 0))
+            sent_m = sent_m[0][:,0,:]
+        else:
+            sent_m_with_pos = sent_m_with_pos.long()
+            sent_m = sent_m_with_pos[..., 0]
+            positions = sent_m_with_pos[..., 1]
+            sent_m = self._word_embedding(sent_m)
+            positions = self._pos_embedding(positions)
 
-        sent_m = torch.cat((sent_m, positions), dim=-1).transpose(-2, -1).contiguous()
-        sent_m = self._dropout(sent_m)
-        sent_m = self._word_encoding_conv(sent_m)
-        sent_m = self._nonlinearity(sent_m)
-
-        for _ in range(self._p.get("word.repeat.convs", 3)):
-            for convlayer in self._convs:
-                sent_m = convlayer(sent_m)
-            sent_m = self._block_conv(sent_m)
+            sent_m = torch.cat((sent_m, positions), dim=-1).transpose(-2, -1).contiguous()
+            sent_m = self._dropout(sent_m)
+            sent_m = self._word_encoding_conv(sent_m)
             sent_m = self._nonlinearity(sent_m)
 
-        sent_m = self._pool(sent_m).squeeze(dim=-1)
+            for _ in range(self._p.get("word.repeat.convs", 3)):
+                for convlayer in self._convs:
+                    sent_m = convlayer(sent_m)
+                sent_m = self._block_conv(sent_m)
+                sent_m = self._nonlinearity(sent_m)
+
+            sent_m = self._pool(sent_m).squeeze(dim=-1)
         sent_m = self.sem_layers(sent_m)
         return sent_m
 
@@ -394,16 +427,39 @@ class VectorModel(ELModel):
         self._p['entity.emb.size'] = self._entities_embedding_matrix.shape[1]
         self._p['entity.vocab.size'] = len(self._entity2idx)
 
-    def encode_sentence(self, tokens, mention_token_ids=None, out=None):
-        tokens = ['<'] + tokens + ['>']
-        if out is None:
-            out = np.zeros((len(tokens), 2), dtype='int32')
-        mention_token_ids = {j+1 for j in mention_token_ids} if mention_token_ids is not None else set()
+    def encode_sentence(self, tokens, entity=None, mention_token_ids=None, out=None):
+        if use_bert:
+            # 1034, 5796, 1034: ^ ms ^
+            # 1034, 2033, 1034: ^ me ^
+            string = "{} ^MS^ {} ^ME^ {}".format(entity['text'][:entity['offsets'][0]], entity['text'][entity['offsets'][0]:entity['offsets'][1]], entity['text'][entity['offsets'][1]:])
+            tokens = ["[CLS]"] + tokenizer.tokenize(string.lower())
+            input_ids = tokenizer.convert_tokens_to_ids(tokens)
+            out[:min(out.shape[0], len(input_ids))] = input_ids[:min(out.shape[0], len(input_ids))]
+            #in_mention = False
+            #out_idx = 0
+            #for i, token in enumerate(input_ids):
+            #    if out_idx >= out.shape[0]:
+            #        break
+            #    if input_ids[i:i+3] == [1034, 5796, 1034] or input_ids[i-1:i+2] == [1034, 5796, 1034] or input_ids[i-2:i+1] == [1034, 5796, 1034]:
+            #        # skip
+            #        in_mention = True
+            #        continue
+            #    if input_ids[i:i+3] == [1034, 2033, 1034] or input_ids[i-1:i+2] == [1034, 2033, 1034] or input_ids[i-2:i+1] == [1034, 2033, 1034]:
+            #        in_mention = False
+            #        continue
+            #    out[out_idx, 0] = token
+            #    out[out_idx, 1] = 2 if in_mention else 1
+            #    out_idx += 1
+        else:
+            tokens = ['<'] + tokens + ['>']
+            if out is None:
+                out = np.zeros((len(tokens), 2), dtype='int32')
+            mention_token_ids = {j+1 for j in mention_token_ids} if mention_token_ids is not None else set()
 
-        for i, token in enumerate(tokens[:out.shape[0]]):
-            token = token.lower()
-            out[i, 0] = utils.get_word_idx(token, self._word2idx)
-            out[i, 1] = 2 if i in mention_token_ids else 1
+            for i, token in enumerate(tokens[:out.shape[0]]):
+                token = token.lower()
+                out[i, 0] = utils.get_word_idx(token, self._word2idx)
+                out[i, 1] = 2 if i in mention_token_ids else 1
         return out
 
     def encode_tokens(self, tokens, out=None):
@@ -430,7 +486,10 @@ class VectorModel(ELModel):
         batch_size = len(entities_data)
         batch_candidates_per_entity = max(max(len(linkings) for linkings in candidates_data), 1)
         # batch_sent_length = max(max(len(e['sentence_tokens']) for e in entities_data), 1)
-        batch_sent_length = 15
+        if use_bert:
+            batch_sent_length = 64
+        else:
+            batch_sent_length = 15
         # batch_mention_length = max(max(len(e['mention_context']) for e in entities_data), 1)
         batch_mention_length = 25
         # batch_label_length = max(max(len(l['label_tokens']) for linkings in candidates_data for l in linkings), 1)
@@ -438,10 +497,15 @@ class VectorModel(ELModel):
         # batch_signature_size = max(max(l['num_related_relations'] for linkings in candidates_data for l in linkings), 1)
         batch_signature_size = 25
 
-        sentences_matrix = np.zeros((batch_size,
-                                     batch_sent_length,
-                                     2),
-                                    dtype="int32")
+        if use_bert:
+            sentences_matrix = np.zeros((batch_size,
+                                         batch_sent_length),
+                                        dtype="int32")
+        else:
+            sentences_matrix = np.zeros((batch_size,
+                                         batch_sent_length,
+                                         2),
+                                        dtype="int32")
 
         mention_matrix = np.zeros((batch_size,
                                    batch_mention_length,
@@ -476,7 +540,7 @@ class VectorModel(ELModel):
                                        features_size))
         for i, (entity, linkings) in enumerate(tqdm(zip(entities_data, candidates_data),
                                                         ascii=True, ncols=100, disable=(not verbose))):
-            self.encode_sentence(entity['sentence_tokens'],
+            self.encode_sentence(entity['sentence_tokens'], entity=entity,
                                  mention_token_ids=entity['token_ids'], out=sentences_matrix[i])
             self.encode_mention(entity['mention_context'], out=mention_matrix[i])
             for j, l in enumerate(linkings):

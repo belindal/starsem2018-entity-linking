@@ -3,7 +3,7 @@ logger:
 
 global:
   random.seed: 1
-  gpu.id: 2
+  gpu.id: 1
 
 training:
   log.results: "data/training.log"
@@ -37,7 +37,7 @@ entity.linking:  # These parameters are used to instantiate an entity linker
     mention_context_size: 2
 
 wikidata:
-  backend: "http://knowledgebase:8890/sparql"
+  backend: "http://localhost:8890/sparql"
   timeout: 20
   filter.out.relation.classes: "rq"
   
